@@ -1,0 +1,628 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+z---
+title: "Research Project"
+output: html_document
+date: "2024-08-28"
+---
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(tidymodels)
+
+```
+
+
+
+```{r}
+#read in files
+intakes <- read.csv("Austin_Animal_Center_Intakes.csv")
+outcomes <- read.csv("Austin_Animal_Center_Outcomes.csv")
+
+```
+
+
+```{r}
+glimpse(intakes)
+glimpse(outcomes)
+```
+
+```{r}
+# only keep the animals that are not repeated
+intakes_uni <- intakes |>
+  group_by(Animal.ID) |>  
+  filter(n() == 1) |> 
+  ungroup()
+
+outcomes_uni <- outcomes |>
+  group_by(Animal.ID) |>  
+  filter(n() == 1) |> 
+  ungroup()
+```
+
+
+```{r}
+intakes_c <- intakes_uni |>
+  filter(Animal.Type == "Dog") |>
+  mutate(Name = str_remove_all(Name, "\\*")) |> #remove astericks from names
+  mutate(Intake_Date = as.Date(gsub(" .*$", "", DateTime), format = "%m/%d/%Y")) |>
+  separate(Sex.upon.Intake, into = c("Intake.Fix", "Sex"), sep = " ") |>
+    mutate(Fix = if_else(str_detect(Intake.Fix, "Intact"), "Intact", "Fixed")) |>
+    mutate(age_in_months_in = case_when(
+    str_detect(Age.upon.Intake, "year") ~ as.numeric(str_extract(Age.upon.Intake, "\\d+")) * 12,
+    str_detect(Age.upon.Intake, "month") ~ as.numeric(str_extract(Age.upon.Intake, "\\d+")),
+    str_detect(Age.upon.Intake, "week") ~ as.numeric(str_extract(Age.upon.Intake, "\\d+")) / 4,
+    str_detect(Age.upon.Intake, "day") ~ as.numeric(str_extract(Age.upon.Intake, "\\d+")) / 30.4)) |>
+    mutate(Intake.Condition= if_else(str_detect(Intake.Condition, "Normal"), "Normal", "Other" )) |>
+    mutate(Intake.Type= if_else(str_detect(Intake.Type, "Stray"), "Stray", "Other" )) |>
+    filter(age_in_months_in >= 0) |>
+    mutate(mixed = if_else(str_detect(Breed, "Mix|/"), "Mixed", "Pure")) |>
+  select(Animal.ID, Name, age_in_months_in, Intake_Date, Intake.Type, Intake.Condition, Fix, Sex, Breed, Color, mixed, DateTime)
+  
+
+
+```
+
+```{r}
+outcomes_c <- outcomes_uni |>
+  filter(Animal.Type == "Dog") |>
+  filter(Outcome.Type == "Adoption") |>
+  filter(!Outcome.Subtype  %in% c("Foster", "Offsite")) |>
+  mutate(Outcome_Date = as.Date(gsub(" .*$", "", DateTime), format = "%m/%d/%Y")) |>
+    mutate(age_in_months_outcome = case_when(
+    str_detect(Age.upon.Outcome, "year") ~ as.numeric(str_extract(Age.upon.Outcome, "\\d+")) * 12,
+    str_detect(Age.upon.Outcome, "month") ~ as.numeric(str_extract(Age.upon.Outcome, "\\d+")),
+    str_detect(Age.upon.Outcome, "week") ~ as.numeric(str_extract(Age.upon.Outcome, "\\d+")) / 4,    str_detect(Age.upon.Outcome, "day") ~ as.numeric(str_extract(Age.upon.Outcome, "\\d+")) / 30.4
+  )) |> 
+  filter(age_in_months_outcome >= 0) |>
+
+  select(Animal.ID, age_in_months_outcome, Outcome_Date, DateTime)
+```
+
+
+```{r}
+adoptions <- intakes_c |>
+  inner_join(outcomes_c, by = "Animal.ID")
+
+adoptions |> dim()
+```
+
+
+```{r}
+summary(adoptions)
+```
+```{r}
+table(adoptions$Intake.Type)
+```
+
+```{r}
+table(adoptions$mixed)
+```
+
+
+```{r}
+table(adoptions$Intake.Condition)
+```
+```{r}
+table(adoptions$Fix)
+```
+
+
+```{r}
+table(adoptions$Sex)
+```
+
+```{r}
+adoptions <- adoptions |>
+  mutate(shelter_stay = Outcome_Date - Intake_Date) |>
+  mutate(stay = as.numeric(str_extract(shelter_stay, "\\d+"))) 
+```
+
+```{r}
+fivenum(adoptions$shelter_stay)
+```
+
+
+
+```{r}
+
+adoptions |>
+  ggplot(aes(x = age_in_months_in, y = shelter_stay)) +
+  geom_point() +
+  labs( title = "Relationship beween Age and Shelter Stay", 
+       x = "Age at Intake (months)", 
+       y = "Shelter Stay")
+
+```
+
+```{r}
+
+adoptions |>
+  ggplot(aes(x = age_in_months_outcome, y = shelter_stay)) +
+  geom_point()
+
+```
+```{r}
+# remove outlier
+adoptions <- adoptions[adoptions$shelter_stay < 1000,]
+```
+
+
+
+```{r}
+fivenum(adoptions$shelter_stay)
+```
+
+
+```{r}
+
+adoptions |>
+ggplot( aes(x = Intake.Type, y = shelter_stay)) +
+  geom_boxplot() +
+  labs(title = "Days in Shelter by Intake Type", x = "Intake Type", y = "Days in Shelter")
+
+```
+
+```{r}
+adoptions|>
+ggplot( aes(x = shelter_stay)) +
+  geom_histogram() +
+  labs(title = "Days in Shelter by Intake Type", x = "Intake Type", y = "Days in Shelter") +
+  facet_wrap(~ Intake.Type)
+```
+
+
+
+
+
+```{r}
+adoptions |>
+ggplot( aes(x = Intake.Condition, y = shelter_stay)) +
+  geom_boxplot() +
+  labs(title = "Days in Shelter by Intake Condition", x = "Intake Condition", y = "Days in Shelter")
+```
+
+```{r}
+adoptions |>
+ggplot( aes(x = shelter_stay)) +
+  geom_histogram() +
+  labs(title = "Days in Shelter by Sex", x = "Sex", y = "Frequency") +
+  facet_wrap(~ Sex)
+```
+
+```{r}
+adoptions |>
+ggplot( aes(x = shelter_stay)) +
+  geom_histogram() +
+  labs(title = "Days in Shelter by Mix", x = "Mix", y = "Frequency") +
+  facet_wrap(~ mixed)
+```
+
+```{r}
+adoptions|>
+ggplot( aes(x = shelter_stay)) +
+  geom_histogram() +
+  labs(title = "Days in Shelter by Intake Fix", x = "Intake Fix", y = "Frequency") +
+  facet_wrap(~ Fix)
+```
+```{r}
+# linear regression
+rec <- adoptions %>%
+  select(age_in_months_in, Intake.Type, Intake.Condition, Fix, Sex, mixed, stay) |>
+  recipe(stay ~ . ) |>
+  step_mutate(Fix = as.factor(Fix), 
+              mixed = as.factor(mixed)) |>
+  step_dummy(Intake.Type, Intake.Condition, Fix, Sex, mixed) |>
+  prep()
+
+model <- linear_reg() %>% 
+    set_engine("lm") %>% 
+    set_mode("regression")
+
+wf <- workflow() %>% 
+    add_recipe(rec) %>% 
+    add_model(model)
+
+model_fit <- fit(wf, data = adoptions)
+
+model_fit %>% 
+    extract_fit_engine() %>% 
+    summary() 
+```
+
+
+```{r}
+# log transform the outcome
+adoptions <- adoptions %>%
+  mutate(log_stay = log(stay + 1))
+```
+
+
+
+```{r}
+## Immediately split the data into training and test sets
+dat_split <- initial_split(adoptions)
+dat_train <- training(dat_split)
+dat_split
+```
+
+
+```{r}
+# linear regression
+
+rec <- dat_train %>% 
+  select(Intake.Type, Intake.Condition, Fix, Sex, stay) |>
+  recipe(stay ~ . ) |>
+  step_mutate(Fix = as.factor(Fix)) |>
+  step_dummy(Intake.Type, Intake.Condition, Fix, Sex) |>
+  prep()
+
+
+model <- linear_reg() %>% 
+    set_engine("lm") %>% 
+    set_mode("regression")
+
+wf <- workflow() %>% 
+    add_recipe(rec) %>% 
+    add_model(model)
+
+model_fit <- fit(wf, data = dat_train)
+
+## Check performance on the complete training data
+model_fit %>% 
+    extract_fit_engine() %>% 
+    summary() 
+
+## Check performance using cross-validation
+folds <- vfold_cv(dat_train, v = 10) 
+
+model_fit <- fit_resamples(wf, resamples = folds)
+model_fit %>% 
+    collect_metrics() 
+
+lr <-  model_fit |>
+  collect_metrics() |>
+  filter(.metric == "rmse") |>
+  select(mean) |>
+  rename(rmse = mean)
+
+#rmse: 31.44
+#rsq: 0.024
+```
+
+
+```{r}
+# random forest
+rec <- dat_train %>% 
+  select(Intake.Type, Intake.Condition, Fix, Sex, stay) |>
+  recipe(stay ~ . ) |>
+  step_mutate(Fix = as.factor(Fix)) |>
+  step_dummy(Intake.Type, Intake.Condition, Fix, Sex) |>
+  prep()
+
+
+model <- rand_forest(mtry = tune("mtry"),
+                     min_n = tune("min_n")) %>% 
+    set_engine("ranger") %>% 
+    set_mode("regression")
+
+wf <- workflow() %>% 
+    add_recipe(rec) %>% 
+    add_model(model)
+
+## Fit model over grid of tuning parameters
+res <- tune_grid(wf, resamples = folds, 
+                 grid = expand.grid(mtry = c(1, 2, 3),
+                                    min_n = c(1, 3, 5)))
+
+res %>% 
+    show_best(metric = "rmse")
+
+res %>% 
+    show_best(metric = "rsq")
+```
+
+
+
+
+```{r}
+# create rf model with tuned hyperparameters
+model <- rand_forest(mtry = 2, #change
+                     min_n = 5) %>% #change
+    set_engine("ranger") %>% 
+    set_mode("regression")
+
+wf <- workflow() %>% 
+    add_recipe(rec) %>% 
+    add_model(model)
+
+folds <- vfold_cv(dat_train, v = 10)
+
+res <- fit_resamples(wf, resamples = folds)
+
+res %>% 
+    collect_metrics()
+
+rf <-  res |>
+  collect_metrics() |>
+  filter(.metric == "rmse") |>
+  select(mean) |>
+  rename(rmse = mean)
+
+#rmse: 31.4
+#rsq: 0.023
+```
+
+
+```{r}
+adoptions|>
+ggplot( aes(x = log_stay)) +
+  geom_histogram() +
+  labs(title = "Days in Shelter by Intake Type", x = "Intake Type", y = "Days in Shelter") +
+  facet_wrap(~ Intake.Type)
+```
+
+
+
+```{r}
+adoptions|>
+ggplot( aes(x = log_stay)) +
+  geom_histogram() +
+  labs(title = "Days in Shelter by Intake Condition", x = "Intake Condition", y = "Days in Shelter") +
+  facet_wrap(~ Intake.Condition)
+```
+
+
+```{r}
+adoptions|>
+ggplot( aes(x = log_stay)) +
+  geom_histogram() +
+  labs(title = "Days in Shelter by Intake Type", x = "Intake Type", y = "Days in Shelter") +
+  facet_wrap(~ Sex)
+```
+
+```{r}
+adoptions|>
+ggplot( aes(x = log_stay)) +
+  geom_histogram() +
+  labs(title = "Days in Shelter by Intake Type", x = "Intake Type", y = "Days in Shelter") +
+  facet_wrap(~ Fix)
+```
+
+
+```{r}
+adoptions |>
+ggplot( aes(x = Intake.Type, y = shelter_stay)) +
+  geom_boxplot() +
+    coord_cartesian(ylim = c(0, 100)) + 
+  labs(title = "Days in Shelter by Intake Type (Log Scale)", 
+       x = "Intake Type", 
+       y = "Days in Shelter (log)")
+```
+
+
+```{r}
+adoptions |>
+  ggplot(aes(x = age_in_months_in, y = log_stay)) +
+  geom_jitter(width = 1.5, height = 0) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(title = "Relationship between Age at Intake and Log of Shelter Stay",
+       x = "Age at Intake (in months)",
+       y = "Log of Shelter Stay")
+
+
+  
+```
+
+
+```{r}
+# linear regression
+rec <- adoptions %>%
+  select(age_in_months_in,Intake.Type, Intake.Condition, Fix, Sex, mixed, log_stay) |>
+  recipe(log_stay ~ . ) |>
+  step_mutate(Fix = as.factor(Fix), 
+              mixed = as.factor(mixed)) |>
+  step_dummy(Intake.Type, Intake.Condition, Fix, Sex, mixed) |>
+  prep()
+
+model <- linear_reg() %>% 
+    set_engine("lm") %>% 
+    set_mode("regression")
+
+wf <- workflow() %>% 
+    add_recipe(rec) %>% 
+    add_model(model)
+
+model_fit <- fit(wf, data = adoptions)
+
+model_fit %>% 
+    extract_fit_engine() %>% 
+    summary() 
+```
+
+
+
+```{r}
+
+# linear regression of log
+
+rec <- adoptions %>%
+  select(age_in_months_in,Intake.Type, Intake.Condition, Fix, Sex, mixed, log_stay) |>
+  recipe(log_stay ~ . ) |>
+  step_mutate(Fix = as.factor(Fix), 
+              mixed = as.factor(mixed)) |>
+  step_dummy(Intake.Type, Intake.Condition, Fix, Sex, mixed) |>
+  prep()
+
+
+model <- linear_reg() %>% 
+    set_engine("lm") %>% 
+    set_mode("regression")
+
+wf <- workflow() %>% 
+    add_recipe(rec) %>% 
+    add_model(model)
+
+model_fit <- fit(wf, data = dat_train)
+
+## Check performance on the complete training data
+model_fit %>% 
+    extract_fit_engine() %>% 
+    summary() 
+
+## Check performance using cross-validation
+folds <- vfold_cv(dat_train, v = 10) 
+
+model_fit <- fit_resamples(wf, resamples = folds)
+model_fit %>% 
+    collect_metrics() 
+
+lr <-  model_fit |>
+  collect_metrics() |>
+  filter(.metric == "rmse") |>
+  select(mean) |>
+  rename(rmse = mean)
+
+#rmse: 0.901
+#rsq: 0.059
+
+```
+
+```{r}
+# random forest
+rec <- adoptions %>%
+  select(age_in_months_in,Intake.Type, Intake.Condition, Fix, Sex, mixed, log_stay) |>
+  recipe(log_stay ~ . ) |>
+  step_mutate(Fix = as.factor(Fix), 
+              mixed = as.factor(mixed)) |>
+  step_dummy(Intake.Type, Intake.Condition, Fix, Sex, mixed) |>
+  prep()
+
+model <- rand_forest(mtry = tune("mtry"),
+                     min_n = tune("min_n")) %>% 
+    set_engine("ranger") %>% 
+    set_mode("regression")
+
+wf <- workflow() %>% 
+    add_recipe(rec) %>% 
+    add_model(model)
+
+## Fit model over grid of tuning parameters
+res <- tune_grid(wf, resamples = folds, 
+                 grid = expand.grid(mtry = c(1, 2, 3),
+                                    min_n = c(1, 3, 5)))
+
+res %>% 
+    show_best(metric = "rmse")
+
+res %>% 
+    show_best(metric = "rsq")
+```
+
+```{r}
+# create rf model with tuned hyperparameters
+model <- rand_forest(mtry = 3, #change
+                     min_n = 5) %>% #change
+    set_engine("ranger") %>% 
+    set_mode("regression")
+
+wf <- workflow() %>% 
+    add_recipe(rec) %>% 
+    add_model(model)
+
+folds <- vfold_cv(dat_train, v = 10)
+
+res <- fit_resamples(wf, resamples = folds)
+
+res %>% 
+    collect_metrics()
+
+rf <-  res |>
+  collect_metrics() |>
+  filter(.metric == "rmse") |>
+  select(mean) |>
+  rename(rmse = mean)
+
+#rmse: 0.86
+#rsq: 0.14
+```
+
+
+```{r}
+#final model
+
+## Fit final model (rf) to entire training set; evaluate on test set
+rec <- dat_train %>%
+  select(age_in_months_in, Intake.Type, Intake.Condition, Fix, Sex, mixed, log_stay) |>
+  recipe(log_stay ~ . ) |>
+  step_mutate(Fix = as.factor(Fix), 
+              mixed = as.factor(mixed)) |>
+  step_dummy(Intake.Type, Intake.Condition, Fix, Sex, mixed) |>
+  prep()
+
+model <- rand_forest(mtry = 3, #change
+                     min_n = 5) %>% #change
+    set_engine("ranger") %>% 
+    set_mode("regression")
+
+wf <- workflow() %>% 
+    add_recipe(rec) %>% 
+    add_model(model)
+
+final <- wf %>% 
+    last_fit(split = dat_split) #gives model entire training data set and puts it on test data set
+
+final %>% 
+    collect_metrics()
+
+#rmse: 0.87
+#rsq: 0.15
+```
+
+```{r}
+final %>% 
+    collect_predictions() %>% #col for pred, and outcome variable
+    ggplot(aes(.pred, log_stay)) +
+    geom_point() + 
+    geom_abline(intercept = 0, slope = 1, colour = 'red') +
+   labs(x = "Predicted Log of Shelter Stay", y = "Actual Log of Shelter Stay", title = "Observed Log of Shelter Stay Values vs. Model Predictions")
+```
+
+```{r}
+adoptions_g <- adoptions |>
+  select(age_in_months_in, Intake.Type, Intake.Condition, Fix, Sex, mixed, log_stay)
+
+long_data <- adoptions_g |>
+  select( Intake.Type, Intake.Condition, Fix, Sex, mixed, log_stay)|>
+  rename(
+               "Intake Type" = "Intake.Type",
+               "Intake Condition" = "Intake.Condition",
+                "Mix" = "mixed",
+         ) |>
+  mutate(across(c( "Intake Type", "Intake Condition", "Fix", "Sex", "Mix"), as.character)) |>
+  pivot_longer(cols = -log_stay, names_to = "predictor", values_to = "value")
+```
+
+
+```{r}
+ggplot(long_data, aes(x = value, y = log_stay)) +
+  geom_boxplot(aes(group = value), outlier.alpha = 0.5, fill = "#87CEEB", color = "black") +
+  facet_wrap(~ predictor, scales = "free_x", ncol = 3) + 
+  labs(
+    title = "Relationships Between Predictors and Outcome Variable",
+    x = "Predictor Values",
+    y = "Log of Shelter Stay"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+#ggsave("long_plot.png", width = 12, height = 8, dpi = 300)
+
+```
+
